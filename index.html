@@ -1,0 +1,1246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mod Porter — rebuild a Minecraft mods zip for another version or loader</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='1' width='14' height='14' fill='%23262c3a'/><rect x='3' y='3' width='4' height='4' fill='%237ec453'/><rect x='9' y='9' width='4' height='4' fill='%23e8b64c'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#12151c;
+    --bg-cell:#161a23;
+    --panel:#1b202b;
+    --panel-2:#202633;
+    --slot:#262c3a;
+    --bevel-hi:#3d4658;
+    --bevel-lo:#0b0d13;
+    --line:#2b3242;
+    --ink:#e9e4d3;
+    --muted:#969eb1;
+    --grass:#7ec453;
+    --grass-dim:#3c5c2e;
+    --gold:#e8b64c;
+    --redstone:#e06050;
+    --lapis:#7ba2ff;
+    --font-display:'Silkscreen', monospace;
+    --font-body:'Atkinson Hyperlegible', system-ui, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      conic-gradient(var(--bg-cell) 90deg, transparent 90deg 180deg, var(--bg-cell) 180deg 270deg, transparent 270deg)
+      0 0 / 28px 28px,
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:16px;
+    line-height:1.55;
+    min-height:100vh;
+  }
+  a{color:var(--lapis)}
+  a:hover{color:#a6c0ff}
+  .wrap{max-width:920px;margin:0 auto;padding:40px 20px 80px}
+
+  /* ---------- header ---------- */
+  header{margin-bottom:28px}
+  .wordmark{
+    font-family:var(--font-display);
+    font-size:clamp(26px,5vw,40px);
+    letter-spacing:2px;
+    margin:0 0 6px;
+    color:var(--ink);
+    text-shadow:3px 3px 0 var(--bevel-lo);
+  }
+  .wordmark .accent{color:var(--grass)}
+  .tagline{margin:0;color:var(--muted);max-width:60ch}
+
+  .banner{
+    display:none;
+    margin:18px 0 0;
+    padding:12px 14px;
+    background:#2b2413;
+    border:2px solid;
+    border-color:#5c4d21 #1a1508 #1a1508 #5c4d21;
+    color:#f0d896;
+    font-size:14px;
+  }
+  .banner.show{display:block}
+
+  /* ---------- workbench ---------- */
+  .bench-card{
+    background:var(--panel);
+    border:2px solid;
+    border-color:var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi);
+    padding:22px;
+    margin-top:26px;
+  }
+  .bench{
+    display:grid;
+    grid-template-columns:1fr 64px 1.25fr 64px 1fr;
+    align-items:stretch;
+  }
+  .slot{
+    background:var(--slot);
+    border:2px solid;
+    border-color:var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo); /* inset look */
+    padding:14px;
+    display:flex;
+    flex-direction:column;
+    min-height:190px;
+  }
+  .slot-label{
+    font-family:var(--font-display);
+    font-size:11px;
+    letter-spacing:2px;
+    color:var(--muted);
+    margin:0 0 10px;
+  }
+  .arrow-cell{display:flex;align-items:center;justify-content:center;padding:0 6px}
+  .pixel-arrow{width:52px;height:32px;display:block}
+  .pixel-arrow .base{fill:#3a4254}
+  .pixel-arrow .fill{fill:var(--grass)}
+  #arrowFillClip rect{transition:width .25s linear}
+
+  /* input slot */
+  .drop{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    gap:6px;
+    cursor:pointer;
+    border:2px dashed #414b61;
+    padding:10px;
+    color:var(--muted);
+    transition:border-color .15s, color .15s;
+  }
+  .drop:hover,.drop.dragover{border-color:var(--grass);color:var(--ink)}
+  .drop.loaded{border-style:solid;border-color:#414b61;color:var(--ink);cursor:pointer}
+  .drop .big{font-weight:700;font-size:15px}
+  .drop .sub{font-size:13px}
+  .drop .file-line{font-family:var(--font-mono);font-size:12.5px;word-break:break-all;color:var(--ink)}
+  .drop .count-line{font-size:13px;color:var(--grass);font-weight:700}
+  input[type=file]{display:none}
+
+  /* target slot */
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px}
+  select,input[type=text],input[type=password]{
+    width:100%;
+    background:var(--panel-2);
+    color:var(--ink);
+    border:2px solid;
+    border-color:var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo);
+    padding:8px 10px;
+    font-family:var(--font-mono);
+    font-size:14px;
+  }
+  select:focus-visible,input:focus-visible,button:focus-visible,.drop:focus-visible,summary:focus-visible,a:focus-visible{
+    outline:2px solid var(--lapis);
+    outline-offset:2px;
+  }
+  .snap-row{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12.5px;color:var(--muted)}
+  .snap-row input{width:auto;accent-color:var(--grass)}
+  details.adv{margin-top:auto;font-size:13px}
+  details.adv summary{cursor:pointer;color:var(--muted)}
+  details.adv summary:hover{color:var(--ink)}
+  details.adv .hint{color:var(--muted);font-size:12px;margin:6px 0 0}
+
+  /* output slot */
+  .out-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;color:var(--muted)}
+  .out-body .ready-count{font-family:var(--font-display);font-size:15px;color:var(--grass);letter-spacing:1px}
+  .slot.lit{border-color:var(--grass-dim) var(--bevel-hi) var(--bevel-hi) var(--grass-dim);animation:glow 1.6s ease-in-out 2}
+  @keyframes glow{50%{box-shadow:0 0 22px 0 rgba(126,196,83,.35)}}
+
+  /* buttons */
+  .btn{
+    font-family:var(--font-display);
+    letter-spacing:1.5px;
+    font-size:14px;
+    color:#0e1208;
+    background:var(--grass);
+    border:2px solid;
+    border-color:#a8de85 #46702f #46702f #a8de85;
+    padding:12px 22px;
+    cursor:pointer;
+    text-shadow:1px 1px 0 rgba(255,255,255,.25);
+  }
+  .btn:hover:not(:disabled){filter:brightness(1.07)}
+  .btn:active:not(:disabled){border-color:#46702f #a8de85 #a8de85 #46702f;transform:translateY(1px)}
+  .btn:disabled{background:#3a4254;color:#79839a;border-color:#4a556c #23293a #23293a #4a556c;cursor:not-allowed;text-shadow:none}
+  .btn.small{padding:8px 14px;font-size:12px}
+  .btn.ghost{background:var(--panel-2);color:var(--muted);border-color:var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi)}
+  .btn.ghost:hover{color:var(--ink)}
+
+  .run-row{margin-top:20px;display:flex;flex-direction:column;align-items:center;gap:10px}
+  #runBtn{width:min(420px,100%)}
+  .phase{font-family:var(--font-mono);font-size:13px;color:var(--muted);min-height:1.4em;text-align:center}
+
+  /* ---------- results ---------- */
+  .results{display:none;margin-top:34px}
+  .results.show{display:block}
+  .results h2{
+    font-family:var(--font-display);
+    font-size:14px;
+    letter-spacing:2px;
+    color:var(--muted);
+    margin:0 0 12px;
+  }
+  .summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .chip{
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    padding:4px 10px;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    color:var(--muted);
+  }
+  .chip b{color:var(--ink);font-weight:500}
+  .chip.g b{color:var(--grass)} .chip.y b{color:var(--gold)} .chip.r b{color:var(--redstone)}
+
+  .rows{background:var(--panel);border:2px solid;border-color:var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi)}
+  .row{
+    display:grid;
+    grid-template-columns:22px minmax(0,1fr) auto;
+    gap:12px;
+    align-items:center;
+    padding:10px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  .row:last-child{border-bottom:none}
+  .pip{
+    width:14px;height:14px;
+    background:#3a4254;
+    border:2px solid;
+    border-color:var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo);
+  }
+  .row.s-work .pip{background:var(--lapis);animation:blink 1s steps(2) infinite}
+  .row.s-ok .pip{background:var(--grass)}
+  .row.s-manual .pip{background:var(--gold)}
+  .row.s-skip .pip{background:#5a5030}
+  .row.s-bad .pip{background:var(--redstone)}
+  @keyframes blink{50%{opacity:.35}}
+  .row .names{min-width:0}
+  .row .title{font-weight:700;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .file{font-family:var(--font-mono);font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .status{
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:var(--muted);
+    text-align:right;
+    white-space:nowrap;
+  }
+  .row.s-ok .status{color:var(--grass)}
+  .row.s-manual .status{color:var(--gold)}
+  .row.s-bad .status{color:var(--redstone)}
+  .row .status a{color:var(--gold)}
+  .row .status .ver{color:var(--muted)}
+
+  .results-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+
+  details.log{margin-top:16px;font-size:13px}
+  details.log summary{cursor:pointer;color:var(--muted);font-family:var(--font-mono)}
+  details.log pre{
+    background:#0e1118;
+    border:1px solid var(--line);
+    padding:12px;
+    max-height:260px;
+    overflow:auto;
+    font-family:var(--font-mono);
+    font-size:12px;
+    color:#aab3c6;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+
+  footer{margin-top:44px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+  footer p{margin:6px 0}
+
+  @media (max-width:760px){
+    .bench{grid-template-columns:1fr}
+    .arrow-cell{padding:8px 0}
+    .pixel-arrow{transform:rotate(90deg)}
+    .slot{min-height:0}
+    .row{grid-template-columns:22px minmax(0,1fr)}
+    .row .status{grid-column:2;text-align:left;white-space:normal}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 class="wordmark">MOD<span class="accent">&gt;</span>PORTER</h1>
+    <p class="tagline">Drop in a zip of Minecraft mods, pick a game version and loader, and get back the same mods rebuilt for that target — fetched from Modrinth, with CurseForge as the fallback. Mods with no matching build are skipped.</p>
+    <div class="banner" id="netBanner">
+      Can't reach the mod databases from here. If you're viewing this inside a sandboxed preview (like Claude), download this file and open it in your browser — it runs entirely on your machine.
+    </div>
+  </header>
+
+  <section class="bench-card" aria-label="Workbench">
+    <div class="bench">
+      <!-- INPUT -->
+      <div class="slot">
+        <p class="slot-label">INPUT</p>
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose a mods zip">
+          <span class="big">Drop a mods .zip</span>
+          <span class="sub">or click to browse — loose .jar files work too</span>
+        </div>
+        <input type="file" id="fileInput" accept=".zip,.jar" multiple>
+      </div>
+
+      <div class="arrow-cell" aria-hidden="true">
+        <svg class="pixel-arrow" viewBox="0 0 52 32">
+          <g class="base">
+            <rect x="0" y="12" width="32" height="8"/>
+            <rect x="32" y="4" width="8" height="24"/>
+            <rect x="40" y="10" width="6" height="12"/>
+            <rect x="46" y="14" width="6" height="4"/>
+          </g>
+        </svg>
+      </div>
+
+      <!-- TARGET -->
+      <div class="slot">
+        <p class="slot-label">TARGET</p>
+        <div class="field">
+          <label for="verSelect">Minecraft</label>
+          <select id="verSelect"></select>
+          <input type="text" id="verText" placeholder="e.g. 1.21.5" style="display:none" spellcheck="false">
+          <div class="snap-row">
+            <input type="checkbox" id="snapToggle">
+            <label for="snapToggle" style="margin:0">include snapshots</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="loaderSelect">Loader</label>
+          <select id="loaderSelect">
+            <option value="fabric">Fabric</option>
+            <option value="forge">Forge</option>
+            <option value="neoforge">NeoForge</option>
+            <option value="quilt">Quilt</option>
+          </select>
+        </div>
+        <details class="adv">
+          <summary>CurseForge API key (optional)</summary>
+          <div class="field" style="margin-top:8px">
+            <input type="password" id="cfKey" placeholder="paste key…" autocomplete="off">
+            <p class="hint">Without a key, CurseForge lookups go through the public curse.tools mirror, which can be slow or down. Free keys: console.curseforge.com</p>
+          </div>
+        </details>
+      </div>
+
+      <div class="arrow-cell" aria-hidden="true">
+        <svg class="pixel-arrow" viewBox="0 0 52 32">
+          <defs>
+            <clipPath id="arrowFillClip"><rect id="arrowFillRect" x="0" y="0" width="0" height="32"/></clipPath>
+          </defs>
+          <g class="base">
+            <rect x="0" y="12" width="32" height="8"/>
+            <rect x="32" y="4" width="8" height="24"/>
+            <rect x="40" y="10" width="6" height="12"/>
+            <rect x="46" y="14" width="6" height="4"/>
+          </g>
+          <g class="fill" clip-path="url(#arrowFillClip)">
+            <rect x="0" y="12" width="32" height="8"/>
+            <rect x="32" y="4" width="8" height="24"/>
+            <rect x="40" y="10" width="6" height="12"/>
+            <rect x="46" y="14" width="6" height="4"/>
+          </g>
+        </svg>
+      </div>
+
+      <!-- OUTPUT -->
+      <div class="slot" id="outSlot">
+        <p class="slot-label">OUTPUT</p>
+        <div class="out-body" id="outBody">
+          <span>Your rebuilt zip lands here.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="run-row">
+      <button class="btn" id="runBtn" disabled>REBUILD MODS</button>
+      <div class="phase" id="phase"></div>
+    </div>
+  </section>
+
+  <section class="results" id="results" aria-live="polite">
+    <h2>MODS</h2>
+    <div class="summary" id="summary"></div>
+    <div class="rows" id="rows"></div>
+    <div class="results-actions">
+      <button class="btn small ghost" id="copyReport">Copy report</button>
+    </div>
+    <details class="log">
+      <summary>log</summary>
+      <pre id="log"></pre>
+    </details>
+  </section>
+
+  <footer>
+    <p>Mods are matched first by file hash on Modrinth, then by name; anything left over is looked up on CurseForge by fingerprint, then by name. Files download straight from the official CDNs.</p>
+    <p>Mods whose authors turned off third-party downloads (or whose CDN blocks in-page fetches) get a manual download link instead of being packed into the zip. Name-based matches are best-effort — double-check anything marked “name match”.</p>
+  </footer>
+</div>
+
+<noscript><p style="padding:20px">This tool needs JavaScript to run.</p></noscript>
+
+<script id="app">
+(() => {
+'use strict';
+
+/* ============================== helpers ============================== */
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  drop: $('drop'), fileInput: $('fileInput'),
+  verSelect: $('verSelect'), verText: $('verText'), snapToggle: $('snapToggle'),
+  loaderSelect: $('loaderSelect'), cfKey: $('cfKey'),
+  runBtn: $('runBtn'), phase: $('phase'), arrowRect: $('arrowFillRect'),
+  results: $('results'), summary: $('summary'), rows: $('rows'),
+  log: $('log'), outSlot: $('outSlot'), outBody: $('outBody'),
+  netBanner: $('netBanner'), copyReport: $('copyReport'),
+};
+
+const state = {
+  jars: [],            // {name, path, bytes, size, sha1, fp, meta, row, resolved, ...flags}
+  versionsAll: [],     // from Modrinth tag endpoint
+  running: false,
+  outUrl: null,
+  cfDown: false,
+  mrDown: false,
+};
+
+const LOADER_LABEL = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' };
+const CF_LOADER = { forge: 1, fabric: 4, quilt: 5, neoforge: 6 };
+const MR = 'https://api.modrinth.com/v2';
+
+function log(msg) {
+  const t = new Date().toTimeString().slice(0, 8);
+  els.log.textContent += `[${t}] ${msg}\n`;
+}
+function setPhase(t) { els.phase.textContent = t; }
+function setProgress(pct) {
+  els.arrowRect.setAttribute('width', String(Math.round(52 * Math.max(0, Math.min(100, pct)) / 100)));
+}
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function uniq(arr) { return [...new Set(arr)]; }
+function encArr(a) { return encodeURIComponent(JSON.stringify(a)); }
+
+async function jsonFetch(url, opts) {
+  const resp = await fetch(url, opts);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url.split('?')[0]}`);
+  return resp.json();
+}
+function postJson(url, body, headers) {
+  return jsonFetch(url, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
+    body: JSON.stringify(body),
+  });
+}
+async function pool(items, n, fn) {
+  const queue = items.map((it, i) => [it, i]);
+  const workers = Array.from({ length: Math.min(n, queue.length) }, async () => {
+    while (queue.length) {
+      const [it, i] = queue.shift();
+      await fn(it, i);
+    }
+  });
+  await Promise.all(workers);
+}
+
+/* ------------------------------ hashing ------------------------------ */
+
+function sha1HexSync(bytes) {
+  const ml = bytes.length;
+  const total = Math.ceil((ml + 9) / 64) * 64;
+  const buf = new Uint8Array(total);
+  buf.set(bytes);
+  buf[ml] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(total - 8, Math.floor((ml * 8) / 0x100000000));
+  dv.setUint32(total - 4, (ml * 8) >>> 0);
+  let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
+  const w = new Uint32Array(80);
+  for (let off = 0; off < total; off += 64) {
+    for (let t = 0; t < 16; t++) w[t] = dv.getUint32(off + t * 4);
+    for (let t = 16; t < 80; t++) {
+      const x = w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16];
+      w[t] = ((x << 1) | (x >>> 31)) >>> 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4;
+    for (let t = 0; t < 80; t++) {
+      let f, k;
+      if (t < 20) { f = (b & c) | (~b & d); k = 0x5A827999; }
+      else if (t < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
+      else if (t < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+      else { f = b ^ c ^ d; k = 0xCA62C1D6; }
+      const temp = ((((a << 5) | (a >>> 27)) >>> 0) + (f >>> 0) + e + k + w[t]) >>> 0;
+      e = d; d = c; c = ((b << 30) | (b >>> 2)) >>> 0; b = a; a = temp;
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0; h4 = (h4 + e) >>> 0;
+  }
+  return [h0, h1, h2, h3, h4].map(x => x.toString(16).padStart(8, '0')).join('');
+}
+
+async function sha1Hex(bytes) {
+  if (crypto && crypto.subtle) {
+    try {
+      const digest = await crypto.subtle.digest('SHA-1', bytes);
+      return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) { /* fall through */ }
+  }
+  return sha1HexSync(bytes);
+}
+
+/* MurmurHash2 (seed 1) over whitespace-stripped bytes = CurseForge fingerprint */
+function murmur2(data, seed) {
+  const m = 0x5bd1e995;
+  let len = data.length;
+  let h = (seed ^ len) >>> 0;
+  let i = 0;
+  while (len >= 4) {
+    let k = (data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24)) >>> 0;
+    k = Math.imul(k, m) >>> 0;
+    k ^= k >>> 24;
+    k = Math.imul(k, m) >>> 0;
+    h = Math.imul(h, m) >>> 0;
+    h = (h ^ k) >>> 0;
+    i += 4; len -= 4;
+  }
+  switch (len) {
+    case 3: h ^= data[i + 2] << 16;
+    case 2: h ^= data[i + 1] << 8;
+    case 1: h ^= data[i]; h = Math.imul(h, m) >>> 0;
+  }
+  h ^= h >>> 13;
+  h = Math.imul(h, m) >>> 0;
+  h ^= h >>> 15;
+  return h >>> 0;
+}
+function cfFingerprint(bytes) {
+  const out = new Uint8Array(bytes.length);
+  let n = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b !== 9 && b !== 10 && b !== 13 && b !== 32) out[n++] = b;
+  }
+  return murmur2(out.subarray(0, n), 1);
+}
+
+/* --------------------------- name matching --------------------------- */
+
+function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+function bigrams(s) { const r = []; for (let i = 0; i < s.length - 1; i++) r.push(s.slice(i, i + 2)); return r; }
+function dice(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+  const B = new Map();
+  for (const g of bigrams(b)) B.set(g, (B.get(g) || 0) + 1);
+  let inter = 0;
+  for (const g of bigrams(a)) { const c = B.get(g); if (c) { inter++; B.set(g, c - 1); } }
+  return 2 * inter / (a.length - 1 + b.length - 1);
+}
+function scorePair(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const d = dice(a, b);
+  if (a.includes(b) || b.includes(a)) {
+    const r = Math.min(a.length, b.length) / Math.max(a.length, b.length);
+    if (r >= 0.8) return Math.max(0.75 + 0.25 * r, d);
+  }
+  return d;
+}
+function jarTargets(jar) {
+  return uniq([jar.knownName, jar.meta.name, jar.meta.modId, jar.meta.guess].filter(Boolean).map(norm)).filter(s => s.length >= 2);
+}
+/* candidates: [{keyA, keyB, ...payload}] where keys are strings to compare (slug/title) */
+function pickBest(candidates, jar, getKeys) {
+  const targets = jarTargets(jar);
+  let best = null, bestScore = 0;
+  candidates.forEach((c, idx) => {
+    let s = 0;
+    for (const key of getKeys(c).map(norm)) {
+      for (const t of targets) s = Math.max(s, scorePair(key, t));
+    }
+    s -= idx * 0.004; // slight preference for higher-ranked search results
+    if (s > bestScore) { bestScore = s; best = c; }
+  });
+  if (best && bestScore >= 0.78) return { cand: best, exact: bestScore >= 0.97 };
+  return null;
+}
+
+/* ------------------------- jar metadata reading ----------------------- */
+
+function rx(text, re) { const m = text.match(re); return m ? m[1] : ''; }
+function looseJson(text) {
+  try { return JSON.parse(text); } catch (e) { /* try cleanup */ }
+  try {
+    const cleaned = text
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/,\s*([}\]])/g, '$1');
+    return JSON.parse(cleaned);
+  } catch (e) { return null; }
+}
+function guessFromFilename(name) {
+  let base = name.replace(/\.jar$/i, '');
+  base = base.replace(/\[[^\]]*\]/g, ' ');
+  base = base.replace(/v?(mc)?1\.\d+(\.\d+)?/gi, ' ');
+  base = base.replace(/\b(fabric|forge|neoforge|quilt|mod|snapshot|release|build)\b/gi, ' ');
+  const cut = base.search(/[-_ +.]v?\d/);
+  if (cut > 2) base = base.slice(0, cut);
+  base = base.replace(/[-_+.]+/g, ' ').replace(/\s+/g, ' ').replace(/\s+v$/i, '').trim();
+  return base;
+}
+async function readJarMeta(jar) {
+  const meta = { modId: '', name: '', guess: guessFromFilename(jar.name), hint: '' };
+  try {
+    const z = await JSZip.loadAsync(jar.bytes);
+    const fj = z.file('fabric.mod.json');
+    const qj = z.file('quilt.mod.json');
+    const nf = z.file('META-INF/neoforge.mods.toml');
+    const fg = z.file('META-INF/mods.toml');
+    const legacy = z.file('mcmod.info');
+    if (fj) {
+      const t = await fj.async('string');
+      const o = looseJson(t);
+      if (o) { meta.modId = o.id || ''; meta.name = o.name || ''; }
+      else { meta.modId = rx(t, /"id"\s*:\s*"([^"]+)"/); meta.name = rx(t, /"name"\s*:\s*"([^"]+)"/); }
+      meta.hint = 'fabric';
+    } else if (qj) {
+      const t = await qj.async('string');
+      const o = looseJson(t);
+      const ql = o && o.quilt_loader;
+      if (ql) { meta.modId = ql.id || ''; meta.name = (ql.metadata && ql.metadata.name) || ''; }
+      meta.hint = 'quilt';
+    } else if (nf || fg) {
+      const t = await (nf || fg).async('string');
+      meta.modId = rx(t, /modId\s*=\s*["']([^"']+)["']/);
+      meta.name = rx(t, /displayName\s*=\s*["']([^"']+)["']/);
+      meta.hint = nf ? 'neoforge' : 'forge';
+    } else if (legacy) {
+      const t = await legacy.async('string');
+      const o = looseJson(t);
+      const first = Array.isArray(o) ? o[0] : (o && o.modList && o.modList[0]);
+      if (first) { meta.modId = first.modid || ''; meta.name = first.name || ''; }
+      meta.hint = 'forge';
+    }
+  } catch (e) { /* unreadable jar — keep filename guess */ }
+  if (/\$\{/.test(meta.name)) meta.name = '';
+  if (/\$\{/.test(meta.modId)) meta.modId = '';
+  return meta;
+}
+
+/* ------------------------------ intake ------------------------------ */
+
+async function handleFiles(fileList) {
+  if (state.running) return;
+  const files = [...fileList];
+  if (!files.length) return;
+  resetResults();
+  state.jars = [];
+  els.drop.classList.add('loaded');
+  els.drop.innerHTML = '<span class="sub">Reading…</span>';
+
+  let zipNames = [];
+  try {
+    for (const f of files) {
+      if (/\.jar$/i.test(f.name)) {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        state.jars.push({ name: f.name, path: f.name, bytes, size: bytes.length });
+      } else if (/\.zip$/i.test(f.name)) {
+        zipNames.push(f.name);
+        const z = await JSZip.loadAsync(await f.arrayBuffer());
+        const entries = Object.values(z.files).filter(e =>
+          !e.dir && /\.jar$/i.test(e.name) && !e.name.includes('__MACOSX') && !e.name.split('/').pop().startsWith('.')
+        );
+        for (const e of entries) {
+          const bytes = await e.async('uint8array');
+          state.jars.push({ name: e.name.split('/').pop(), path: e.name, bytes, size: bytes.length });
+        }
+      }
+    }
+  } catch (e) {
+    log('Failed to read input: ' + e.message);
+    els.drop.innerHTML = '<span class="big">Couldn\u2019t read that file</span><span class="sub">Drop a .zip of mods (or .jar files)</span>';
+    els.drop.classList.remove('loaded');
+    return;
+  }
+
+  if (!state.jars.length) {
+    els.drop.innerHTML = '<span class="big">No .jar files found inside</span><span class="sub">Drop a .zip that contains mod jars</span>';
+    updateRunEnabled();
+    return;
+  }
+
+  const totalSize = state.jars.reduce((a, j) => a + j.size, 0);
+  const label = zipNames.length ? zipNames.join(', ') : `${state.jars.length} jar file${state.jars.length > 1 ? 's' : ''}`;
+  els.drop.innerHTML =
+    `<span class="file-line">${escapeHtml(label)}</span>` +
+    `<span class="count-line">${state.jars.length} mod jar${state.jars.length > 1 ? 's' : ''} \u00b7 ${fmtBytes(totalSize)}</span>` +
+    `<span class="sub">click to choose different files</span>`;
+
+  // read metadata up front so rows have friendly names
+  setPhase('Reading mod metadata\u2026');
+  buildRows();
+  await pool(state.jars, 6, async (jar) => {
+    jar.meta = await readJarMeta(jar);
+    renderRowNames(jar);
+  });
+  setPhase('');
+  updateRunEnabled();
+}
+
+function buildRows() {
+  els.results.classList.add('show');
+  els.rows.innerHTML = '';
+  els.summary.innerHTML = '';
+  for (const jar of state.jars) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML =
+      `<div class="pip"></div>` +
+      `<div class="names"><div class="title"></div><div class="file"></div></div>` +
+      `<div class="status">queued</div>`;
+    els.rows.appendChild(row);
+    jar.row = row;
+    jar.meta = jar.meta || { modId: '', name: '', guess: guessFromFilename(jar.name), hint: '' };
+    renderRowNames(jar);
+  }
+}
+function renderRowNames(jar) {
+  const title = (jar.resolved && jar.resolved.displayName) || jar.meta.name || jar.meta.guess || jar.name;
+  jar.row.querySelector('.title').textContent = title;
+  jar.row.querySelector('.file').textContent = jar.name;
+}
+function setRow(jar, cls, html) {
+  jar.row.className = 'row ' + cls;
+  jar.row.querySelector('.status').innerHTML = html;
+  renderRowNames(jar);
+}
+
+/* ------------------------------ Modrinth ------------------------------ */
+
+function isHttp4(e) { return /HTTP 4\d\d/.test(String(e && e.message)); }
+async function mrIdentify(hashes) {
+  try { return await postJson(`${MR}/version_files`, { hashes, algorithm: 'sha1' }); }
+  catch (e) { if (isHttp4(e)) return {}; throw e; }
+}
+async function mrUpdate(hashes, loader, gv) {
+  try { return await postJson(`${MR}/version_files/update`, { hashes, algorithm: 'sha1', loaders: [loader], game_versions: [gv] }); }
+  catch (e) { if (isHttp4(e)) return {}; throw e; }
+}
+async function mrProjects(ids) {
+  if (!ids.length) return [];
+  return jsonFetch(`${MR}/projects?ids=${encArr(ids)}`);
+}
+async function mrSearch(query, loader, gv) {
+  const facets = encArr([["project_type:mod"], [`categories:${loader}`], [`versions:${gv}`]]);
+  const res = await jsonFetch(`${MR}/search?query=${encodeURIComponent(query)}&facets=${facets}&limit=8`);
+  return res.hits || [];
+}
+async function mrVersions(projectId, loader, gv) {
+  const res = await jsonFetch(`${MR}/project/${projectId}/version?loaders=${encArr([loader])}&game_versions=${encArr([gv])}`);
+  return (res || []).sort((a, b) => new Date(b.date_published) - new Date(a.date_published));
+}
+function mrTarget(version, projInfo) {
+  const f = version.files.find(x => x.primary) || version.files[0];
+  if (!f) return null;
+  const info = projInfo[version.project_id] || {};
+  return {
+    source: 'modrinth',
+    displayName: info.title || version.name || '',
+    versionNumber: version.version_number || '',
+    fileName: f.filename,
+    url: f.url,
+    page: `https://modrinth.com/mod/${info.slug || version.project_id}/version/${version.id}`,
+  };
+}
+
+/* ----------------------------- CurseForge ----------------------------- */
+
+function cfBase() {
+  return els.cfKey.value.trim() ? 'https://api.curseforge.com/v1' : 'https://api.curse.tools/v1/cf';
+}
+function cfHeaders() {
+  const key = els.cfKey.value.trim();
+  return key ? { 'x-api-key': key } : {};
+}
+async function cfGet(path) {
+  return jsonFetch(cfBase() + path, { headers: cfHeaders() });
+}
+async function cfFingerprints(fps) {
+  try { return await postJson(`${cfBase()}/fingerprints/432`, { fingerprints: fps }, cfHeaders()); }
+  catch (e) {
+    if (!isHttp4(e)) throw e;
+    return postJson(`${cfBase()}/fingerprints`, { fingerprints: fps }, cfHeaders());
+  }
+}
+async function cfModInfo(id) {
+  const res = await cfGet(`/mods/${id}`);
+  return res.data;
+}
+async function cfFiles(id, gv, loaderNum) {
+  const res = await cfGet(`/mods/${id}/files?gameVersion=${encodeURIComponent(gv)}&modLoaderType=${loaderNum}&pageSize=50`);
+  return res.data || [];
+}
+async function cfSearch(query, gv, loaderNum) {
+  const res = await cfGet(`/mods/search?gameId=432&classId=6&searchFilter=${encodeURIComponent(query)}&gameVersion=${encodeURIComponent(gv)}&modLoaderType=${loaderNum}&sortField=2&sortOrder=desc&pageSize=10`);
+  return res.data || [];
+}
+const CF_LOADER_TAGS = ['Forge', 'Fabric', 'NeoForge', 'Quilt', 'LiteLoader', 'Rift', 'Cauldron'];
+function pickCfFile(files, gv, loader) {
+  const wantTag = LOADER_LABEL[loader];
+  const usable = files.filter(f => {
+    if (f.isAvailable === false) return false;
+    const tags = Array.isArray(f.gameVersions) ? f.gameVersions : [];
+    if (!tags.length) return true; // very old files carry no tags — trust the API filter
+    if (!tags.includes(gv)) return false;
+    const loaderTags = tags.filter(t => CF_LOADER_TAGS.includes(t));
+    return loaderTags.length === 0 || loaderTags.includes(wantTag);
+  });
+  usable.sort((a, b) => new Date(b.fileDate) - new Date(a.fileDate));
+  return usable[0] || null;
+}
+function cfTarget(mod, file) {
+  return {
+    source: 'curseforge',
+    displayName: mod.name || '',
+    versionNumber: file.displayName || file.fileName || '',
+    fileName: file.fileName,
+    url: file.downloadUrl || null,
+    page: mod.slug
+      ? `https://www.curseforge.com/minecraft/mc-mods/${mod.slug}/files/${file.id}`
+      : ((mod.links && mod.links.websiteUrl) || 'https://www.curseforge.com'),
+  };
+}
+function cfFail(e, what) {
+  if (!state.cfDown) {
+    state.cfDown = true;
+    const usingKey = !!els.cfKey.value.trim();
+    log(`CurseForge ${what} failed: ${e.message}. ` + (usingKey
+      ? 'Check that the API key is valid.'
+      : 'The public curse.tools mirror may be down — add your own API key under "CurseForge API key" for direct access.'));
+  }
+}
+
+/* ------------------------------ pipeline ------------------------------ */
+
+function currentVersion() {
+  return (els.verText.style.display !== 'none' ? els.verText.value : els.verSelect.value).trim();
+}
+function updateRunEnabled() {
+  els.runBtn.disabled = state.running || !state.jars.length || !currentVersion();
+}
+
+function resolveJar(jar, target, statusKind) {
+  jar.resolved = target;
+  jar.statusKind = statusKind;
+  const label = statusKind === 'mr-exact' ? 'Modrinth \u00b7 exact match'
+    : statusKind === 'mr-name' ? 'Modrinth \u00b7 name match'
+    : statusKind === 'cf-exact' ? 'CurseForge \u00b7 exact match'
+    : 'CurseForge \u00b7 name match';
+  setRow(jar, 's-work', `${label} <span class="ver">\u00b7 ${escapeHtml(target.versionNumber || target.fileName)}</span>`);
+}
+
+async function run() {
+  if (state.running || !state.jars.length) return;
+  const gv = currentVersion();
+  const loader = els.loaderSelect.value;
+  if (!gv) return;
+
+  state.running = true;
+  state.cfDown = false;
+  state.mrDown = false;
+  updateRunEnabled();
+  els.runBtn.disabled = true;
+  els.outSlot.classList.remove('lit');
+  els.outBody.innerHTML = '<span>Working\u2026</span>';
+  if (state.outUrl) { URL.revokeObjectURL(state.outUrl); state.outUrl = null; }
+  els.summary.innerHTML = '';
+  for (const jar of state.jars) {
+    jar.resolved = null; jar.statusKind = null; jar.knownName = null;
+    jar.mrNoBuild = false; jar.cfNoBuild = false; jar.cfModId = null; jar.packed = false; jar.manual = false;
+    setRow(jar, 's-work', 'hashing\u2026');
+  }
+  log(`Rebuilding ${state.jars.length} mod(s) for ${LOADER_LABEL[loader]} ${gv}`);
+
+  /* 1 — hash */
+  setPhase('Hashing files\u2026'); setProgress(2);
+  for (let i = 0; i < state.jars.length; i++) {
+    const jar = state.jars[i];
+    jar.sha1 = await sha1Hex(jar.bytes);
+    setProgress(2 + 10 * (i + 1) / state.jars.length);
+  }
+  const bySha = new Map();
+  for (const jar of state.jars) {
+    if (!bySha.has(jar.sha1)) bySha.set(jar.sha1, []);
+    bySha.get(jar.sha1).push(jar);
+  }
+  const hashes = [...bySha.keys()];
+
+  /* 2 — Modrinth by hash */
+  setPhase('Matching hashes on Modrinth\u2026'); setProgress(14);
+  let idMap = {}, upMap = {};
+  try {
+    upMap = await mrUpdate(hashes, loader, gv);
+  } catch (e) {
+    state.mrDown = true;
+    log('Modrinth unavailable (' + e.message + ') — falling back to CurseForge for everything.');
+  }
+  if (!state.mrDown) {
+    try { idMap = await mrIdentify(hashes); } catch (e) { log('Modrinth identify failed: ' + e.message); }
+  }
+  let projInfo = {};
+  try {
+    const ids = uniq([...Object.values(idMap), ...Object.values(upMap)].map(v => v.project_id));
+    const projects = await mrProjects(ids);
+    for (const p of projects) projInfo[p.id] = p;
+  } catch (e) { /* names are cosmetic */ }
+
+  setProgress(30);
+  for (const [sha, jars] of bySha) {
+    const up = upMap[sha];
+    const known = idMap[sha];
+    for (const jar of jars) {
+      if (up) {
+        const t = mrTarget(up, projInfo);
+        if (t) { resolveJar(jar, t, 'mr-exact'); continue; }
+      }
+      if (known) {
+        jar.mrNoBuild = true;
+        const info = projInfo[known.project_id];
+        if (info) jar.knownName = info.title;
+        setRow(jar, 's-work', 'on Modrinth, no matching build \u2014 trying CurseForge\u2026');
+      } else if (!jar.resolved) {
+        setRow(jar, 's-work', 'searching\u2026');
+      }
+    }
+  }
+
+  /* 3 — Modrinth by name (only for jars Modrinth didn't recognize at all) */
+  const forNameSearch = state.jars.filter(j => !j.resolved && !j.mrNoBuild && !state.mrDown);
+  if (forNameSearch.length) {
+    setPhase('Searching Modrinth by name\u2026');
+    let done = 0;
+    await pool(forNameSearch, 4, async (jar) => {
+      const queries = uniq([jar.meta.name, jar.meta.modId, jar.meta.guess].filter(q => q && q.length >= 2)).slice(0, 2);
+      for (const q of queries) {
+        try {
+          const hits = await mrSearch(q, loader, gv);
+          const best = pickBest(hits, jar, h => [h.slug, h.title]);
+          if (best) {
+            const versions = await mrVersions(best.cand.project_id, loader, gv);
+            if (versions.length) {
+              projInfo[best.cand.project_id] = { title: best.cand.title, slug: best.cand.slug, id: best.cand.project_id };
+              const t = mrTarget(versions[0], projInfo);
+              if (t) { resolveJar(jar, t, best.exact ? 'mr-exact' : 'mr-name'); break; }
+            }
+          }
+        } catch (e) { log(`Modrinth search failed for "${q}": ${e.message}`); }
+      }
+      done++;
+      setProgress(30 + 14 * done / forNameSearch.length);
+    });
+  }
+  setProgress(44);
+
+  /* 4 — CurseForge fingerprints */
+  const cfCandidates = state.jars.filter(j => !j.resolved);
+  if (cfCandidates.length) {
+    setPhase('Fingerprinting for CurseForge\u2026');
+    const fpMap = new Map(); // fp -> jars
+    for (let i = 0; i < cfCandidates.length; i++) {
+      const jar = cfCandidates[i];
+      if (jar.fp == null) jar.fp = cfFingerprint(jar.bytes);
+      if (!fpMap.has(jar.fp)) fpMap.set(jar.fp, []);
+      fpMap.get(jar.fp).push(jar);
+      setProgress(44 + 8 * (i + 1) / cfCandidates.length);
+    }
+    setPhase('Matching fingerprints on CurseForge\u2026');
+    try {
+      const res = await cfFingerprints([...fpMap.keys()]);
+      const matches = (res.data && res.data.exactMatches) || [];
+      for (const m of matches) {
+        const f = m.file || {};
+        const jars = fpMap.get(f.fileFingerprint);
+        if (jars) for (const jar of jars) jar.cfModId = f.modId;
+      }
+      log(`CurseForge fingerprints: ${matches.length}/${fpMap.size} matched.`);
+    } catch (e) { cfFail(e, 'fingerprint lookup'); }
+
+    const withId = cfCandidates.filter(j => j.cfModId && !j.resolved);
+    const modCache = new Map();
+    let done = 0;
+    await pool(withId, 3, async (jar) => {
+      try {
+        const files = await cfFiles(jar.cfModId, gv, CF_LOADER[loader]);
+        const file = pickCfFile(files, gv, loader);
+        if (file) {
+          let mod = modCache.get(jar.cfModId);
+          if (!mod) { mod = await cfModInfo(jar.cfModId).catch(() => ({})); modCache.set(jar.cfModId, mod); }
+          resolveJar(jar, cfTarget(mod, file), 'cf-exact');
+        } else {
+          jar.cfNoBuild = true;
+        }
+      } catch (e) { if (!isHttp4(e)) cfFail(e, 'file lookup'); }
+      done++;
+      setProgress(52 + 8 * done / Math.max(1, withId.length));
+    });
+
+    /* 5 — CurseForge by name */
+    const cfNameSearch = cfCandidates.filter(j => !j.resolved && !j.cfModId && !state.cfDown);
+    if (cfNameSearch.length) {
+      setPhase('Searching CurseForge by name\u2026');
+      let d2 = 0;
+      await pool(cfNameSearch, 3, async (jar) => {
+        const queries = uniq([jar.knownName, jar.meta.name, jar.meta.modId, jar.meta.guess].filter(q => q && q.length >= 2)).slice(0, 2);
+        for (const q of queries) {
+          try {
+            const mods = await cfSearch(q, gv, CF_LOADER[loader]);
+            const best = pickBest(mods, jar, m => [m.slug, m.name]);
+            if (best) {
+              const files = await cfFiles(best.cand.id, gv, CF_LOADER[loader]);
+              const file = pickCfFile(files, gv, loader);
+              if (file) { resolveJar(jar, cfTarget(best.cand, file), best.exact ? 'cf-exact' : 'cf-name'); break; }
+              jar.cfNoBuild = true;
+            }
+          } catch (e) { if (isHttp4(e)) continue; cfFail(e, 'search'); break; }
+        }
+        d2++;
+        setProgress(60 + 10 * d2 / cfNameSearch.length);
+      });
+    }
+  }
+  setProgress(70);
+
+  /* 6 — finalize unresolved */
+  for (const jar of state.jars) {
+    if (jar.resolved) continue;
+    if (jar.mrNoBuild || jar.cfNoBuild) {
+      setRow(jar, 's-skip', `skipped \u2014 no ${LOADER_LABEL[loader]} build for ${escapeHtml(gv)}`);
+      jar.statusKind = 'no-build';
+    } else if (state.mrDown && state.cfDown) {
+      setRow(jar, 's-bad', 'lookup failed \u2014 both sources unreachable');
+      jar.statusKind = 'error';
+    } else {
+      setRow(jar, 's-bad', 'not found on Modrinth or CurseForge');
+      jar.statusKind = 'not-found';
+    }
+  }
+
+  /* 7 — download + pack */
+  const byUrl = new Map();
+  for (const jar of state.jars) {
+    if (!jar.resolved) continue;
+    if (!jar.resolved.url) { // author disabled downloads
+      jar.manual = true;
+      setRow(jar, 's-manual', manualHtml(jar, 'author disabled API downloads'));
+      continue;
+    }
+    if (!byUrl.has(jar.resolved.url)) byUrl.set(jar.resolved.url, []);
+    byUrl.get(jar.resolved.url).push(jar);
+  }
+
+  const zip = new JSZip();
+  const usedNames = new Set();
+  let packed = 0, fetchedBytes = 0;
+  const targets = [...byUrl.entries()];
+  setPhase(`Downloading ${targets.length} file(s)\u2026`);
+  let dl = 0;
+  await pool(targets, 4, async ([url, jars]) => {
+    const t = jars[0].resolved;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blob = await resp.blob();
+      let name = t.fileName || url.split('/').pop() || 'mod.jar';
+      if (usedNames.has(name)) {
+        const dot = name.lastIndexOf('.');
+        let i = 2, cand;
+        do { cand = dot > 0 ? name.slice(0, dot) + '-' + i + name.slice(dot) : name + '-' + i; i++; } while (usedNames.has(cand));
+        name = cand;
+      }
+      usedNames.add(name);
+      zip.file(name, blob);
+      fetchedBytes += blob.size;
+      packed += jars.length;
+      for (const jar of jars) {
+        jar.packed = true;
+        setRow(jar, 's-ok', `${sourceLabel(jar)} <span class="ver">\u00b7 ${escapeHtml(t.versionNumber || name)}</span>`);
+      }
+    } catch (e) {
+      for (const jar of jars) {
+        jar.manual = true;
+        setRow(jar, 's-manual', manualHtml(jar, 'direct fetch blocked'));
+      }
+      log(`Download failed for ${t.fileName}: ${e.message} — left a manual link instead.`);
+    }
+    dl++;
+    setProgress(70 + 26 * dl / targets.length);
+  });
+
+  /* 8 — output */
+  setProgress(98);
+  const counts = tally();
+  renderSummary(counts, loader, gv);
+  if (packed > 0) {
+    setPhase('Packing zip\u2026');
+    const outBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    state.outUrl = URL.createObjectURL(outBlob);
+    const outName = `mods-${gv}-${loader}.zip`;
+    els.outBody.innerHTML =
+      `<span class="ready-count">${packed} MOD${packed > 1 ? 'S' : ''} PACKED</span>` +
+      `<span style="font-size:13px">${fmtBytes(outBlob.size)}</span>` +
+      `<a class="btn small" style="text-decoration:none" href="${state.outUrl}" download="${outName}">Download zip</a>`;
+    els.outSlot.classList.add('lit');
+  } else {
+    els.outBody.innerHTML = '<span>Nothing could be packed \u2014 see the list below.</span>';
+  }
+  setProgress(100);
+  setPhase(counts.manual ? 'Done \u2014 some files need a manual click (gold rows).' : 'Done.');
+  log(`Done: ${packed} packed, ${counts.manual} manual, ${counts.skipped} skipped, ${counts.notfound + counts.error} not found/errors.`);
+
+  state.running = false;
+  updateRunEnabled();
+}
+
+function sourceLabel(jar) {
+  return jar.statusKind === 'mr-exact' ? 'Modrinth \u00b7 exact match'
+    : jar.statusKind === 'mr-name' ? 'Modrinth \u00b7 name match'
+    : jar.statusKind === 'cf-exact' ? 'CurseForge \u00b7 exact match'
+    : 'CurseForge \u00b7 name match';
+}
+function manualHtml(jar, why) {
+  const href = jar.resolved.page || jar.resolved.url;
+  return `${why} \u2014 <a href="${escapeHtml(href)}" target="_blank" rel="noopener">get file \u2197</a>`;
+}
+function tally() {
+  const c = { packed: 0, manual: 0, skipped: 0, notfound: 0, error: 0, mr: 0, cf: 0 };
+  for (const jar of state.jars) {
+    if (jar.packed) { c.packed++; if (jar.statusKind.startsWith('mr')) c.mr++; else c.cf++; }
+    else if (jar.manual) c.manual++;
+    else if (jar.statusKind === 'no-build') c.skipped++;
+    else if (jar.statusKind === 'error') c.error++;
+    else c.notfound++;
+  }
+  return c;
+}
+function renderSummary(c, loader, gv) {
+  const bits = [];
+  bits.push(`<span class="chip g"><b>${c.packed}</b> packed</span>`);
+  if (c.packed) bits.push(`<span class="chip"><b>${c.mr}</b> Modrinth \u00b7 <b>${c.cf}</b> CurseForge</span>`);
+  if (c.manual) bits.push(`<span class="chip y"><b>${c.manual}</b> manual download</span>`);
+  if (c.skipped) bits.push(`<span class="chip y"><b>${c.skipped}</b> no ${escapeHtml(LOADER_LABEL[loader])} ${escapeHtml(gv)} build</span>`);
+  if (c.notfound) bits.push(`<span class="chip r"><b>${c.notfound}</b> not found</span>`);
+  if (c.error) bits.push(`<span class="chip r"><b>${c.error}</b> lookup failed</span>`);
+  els.summary.innerHTML = bits.join('');
+}
+
+/* ------------------------------ report ------------------------------ */
+
+function buildReport() {
+  const gv = currentVersion();
+  const loader = els.loaderSelect.value;
+  const lines = [`Mod Porter — target: ${LOADER_LABEL[loader]} ${gv}`, ''];
+  for (const jar of state.jars) {
+    const name = (jar.resolved && jar.resolved.displayName) || jar.meta.name || jar.meta.guess || jar.name;
+    let line;
+    if (jar.packed) line = `[OK]      ${name} — ${sourceLabel(jar)} (${jar.resolved.versionNumber || jar.resolved.fileName})`;
+    else if (jar.manual) line = `[MANUAL]  ${name} — ${jar.resolved.page || jar.resolved.url}`;
+    else if (jar.statusKind === 'no-build') line = `[SKIPPED] ${name} — no ${LOADER_LABEL[loader]} build for ${gv}`;
+    else if (jar.statusKind === 'error') line = `[ERROR]   ${name} — lookup failed`;
+    else line = `[MISSING] ${name} — not found on Modrinth or CurseForge`;
+    lines.push(line + `  (from ${jar.name})`);
+  }
+  return lines.join('\n');
+}
+
+/* --------------------------- version list --------------------------- */
+
+async function loadVersions() {
+  try {
+    const list = await jsonFetch(`${MR}/tag/game_version`);
+    state.versionsAll = list;
+    fillVersionSelect();
+  } catch (e) {
+    els.netBanner.classList.add('show');
+    els.verSelect.style.display = 'none';
+    els.verText.style.display = '';
+    log('Could not load version list from Modrinth (' + e.message + '). Type a version manually.');
+    updateRunEnabled();
+  }
+}
+function fillVersionSelect() {
+  const showSnaps = els.snapToggle.checked;
+  const prev = els.verSelect.value;
+  const versions = state.versionsAll.filter(v => showSnaps || v.version_type === 'release');
+  els.verSelect.innerHTML = versions.map(v =>
+    `<option value="${escapeHtml(v.version)}">${escapeHtml(v.version)}${v.version_type !== 'release' ? ' \u00b7 ' + escapeHtml(v.version_type) : ''}</option>`
+  ).join('');
+  if (prev && versions.some(v => v.version === prev)) els.verSelect.value = prev;
+  updateRunEnabled();
+}
+
+/* ------------------------------ wiring ------------------------------ */
+
+function resetResults() {
+  els.results.classList.remove('show');
+  els.rows.innerHTML = '';
+  els.summary.innerHTML = '';
+  els.outSlot.classList.remove('lit');
+  els.outBody.innerHTML = '<span>Your rebuilt zip lands here.</span>';
+  if (state.outUrl) { URL.revokeObjectURL(state.outUrl); state.outUrl = null; }
+  setProgress(0);
+  setPhase('');
+}
+
+els.drop.addEventListener('click', () => { if (!state.running) els.fileInput.click(); });
+els.drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); els.fileInput.click(); } });
+els.fileInput.addEventListener('change', () => handleFiles(els.fileInput.files));
+['dragover', 'dragenter'].forEach(ev => els.drop.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev => els.drop.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.remove('dragover'); }));
+els.drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+els.snapToggle.addEventListener('change', fillVersionSelect);
+els.verSelect.addEventListener('change', updateRunEnabled);
+els.verText.addEventListener('input', updateRunEnabled);
+els.runBtn.addEventListener('click', () => { run().catch(e => { log('Fatal: ' + e.message); setPhase('Something broke \u2014 see log.'); state.running = false; updateRunEnabled(); }); });
+els.copyReport.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(buildReport());
+    els.copyReport.textContent = 'Copied';
+    setTimeout(() => { els.copyReport.textContent = 'Copy report'; }, 1500);
+  } catch (e) { log('Clipboard blocked: ' + e.message); }
+});
+
+if (typeof JSZip === 'undefined') {
+  els.netBanner.textContent = 'The zip library failed to load — this tool needs an internet connection (cdnjs, Modrinth, CurseForge). If you\u2019re viewing this inside a sandboxed preview, download the file and open it in your browser.';
+  els.netBanner.classList.add('show');
+}
+loadVersions();
+})();
+</script>
+</body>
+</html>
